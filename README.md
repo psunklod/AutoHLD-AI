@@ -2,6 +2,10 @@
 
 ### AI-Assisted AUTOSAR High-Level Design Analysis
 
+[![🚀 Launch Live App](https://img.shields.io/badge/🚀_Launch-Live_App-c4161c?style=for-the-badge)](https://autohld-ai.streamlit.app)
+
+[![🌐 Project Website](https://img.shields.io/badge/🌐_Project-Website-111827?style=for-the-badge)](https://psunklod.github.io/AutoHLD-AI/)
+
 AutoHLD AI is an AI-powered engineering assistant designed to analyze AUTOSAR High-Level Design (HLD) documents and support architecture review workflows.
 
 The system combines **Retrieval-Augmented Generation (RAG)**, **local AI models**, **deterministic architecture extraction**, **HLD revision comparison**, and **engineering impact analysis** in a single interactive interface.
