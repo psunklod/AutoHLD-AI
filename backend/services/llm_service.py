@@ -390,7 +390,6 @@ ANSWER:
             + " | ".join(errors)
         )
 
-
     def _context_fallback(
         self,
         question: str,
@@ -399,82 +398,153 @@ ANSWER:
 
         """
         Safe extractive fallback used when all LLM providers
-        are temporarily unavailable.
+        are unavailable.
 
         Uses only retrieved HLD context and never invents
         information.
         """
 
-        if not context.strip():
+        if not context or not context.strip():
             return (
                 "The provided HLD context does not contain "
                 "enough information."
             )
 
-        question_lower = question.lower()
-
-        # ====================================================
-        # PDF / DOCUMENT SUMMARY
-        # ====================================================
-
-        if (
-            "what is the pdf about" in question_lower
-            or "what is this pdf about" in question_lower
-            or "what is the document about" in question_lower
-            or "what is this document about" in question_lower
-            or "summarize the pdf" in question_lower
-            or "summarize the document" in question_lower
-        ):
-
-            lines = [
-                line.strip()
-                for line in context.splitlines()
-                if line.strip()
-            ]
-
-            useful_lines = []
-
-            for line in lines:
-
-                if line.startswith("[Page"):
-                    continue
-
-                if line not in useful_lines:
-                    useful_lines.append(line)
-
-                if len(useful_lines) >= 5:
-                    break
-
-            if useful_lines:
-
-                return (
-                    "Based on the retrieved HLD context, the document "
-                    "describes an AUTOSAR high-level software architecture. "
-                    "Key information includes: "
-                    + " ".join(useful_lines)
-                )
-
-        # ====================================================
-        # GENERAL CONTEXT FALLBACK
-        # ====================================================
+        question_lower = question.lower().strip()
 
         lines = [
             line.strip()
             for line in context.splitlines()
             if line.strip()
-            and not line.startswith("[Page")
+            and not line.strip().startswith("[Page")
         ]
 
-        if lines:
+        unique_lines = []
 
+        for line in lines:
+            if line not in unique_lines:
+                unique_lines.append(line)
+
+        if not unique_lines:
             return (
-                "Based only on the retrieved HLD context: "
-                + " ".join(lines[:4])
+                "The provided HLD context does not contain "
+                "enough information."
             )
 
+        summary_keywords = [
+	    "what is this hld about",
+            "what is this about",
+            "what is the document about",
+            "what is this document about",
+            "what is the pdf about",
+            "what is this pdf about",
+            "summarize the pdf",
+            "summarise the pdf",
+            "summarize the document",
+            "summarise the document",
+            "summary of the pdf",
+            "summary of the document",
+            "give me a summary",
+            "give me the summary",
+            "describe the document",
+            "describe this document",
+            "explain the document",
+            "explain this hld",
+            "what does this hld contain",
+            "what does the hld contain",
+        ]
+
+        if any(
+            keyword in question_lower
+            for keyword in summary_keywords
+        ):
+
+            preferred_lines = []
+
+            architecture_keywords = [
+                "autosar",
+                "software",
+                "component",
+                "interface",
+                "dependency",
+                "signal",
+                "port",
+                "architecture",
+                "system",
+                "hld",
+            ]
+
+            for line in unique_lines:
+
+                line_lower = line.lower()
+
+                if any(
+                    keyword in line_lower
+                    for keyword in architecture_keywords
+                ):
+                    preferred_lines.append(line)
+
+            selected_lines = preferred_lines[:6]
+
+            if not selected_lines:
+                selected_lines = unique_lines[:6]
+
+            return (
+                "The retrieved HLD context describes an "
+                "AUTOSAR high-level software architecture. "
+                "Key information from the document includes:\n\n"
+                + "\n".join(
+                    f"- {line}"
+                    for line in selected_lines
+                )
+            )
+
+        architecture_keywords = [
+            "architecture",
+            "system design",
+            "software architecture",
+            "hld structure",
+            "high level design",
+        ]
+
+        if any(
+            keyword in question_lower
+            for keyword in architecture_keywords
+        ):
+
+            selected_lines = []
+
+            for line in unique_lines:
+
+                line_lower = line.lower()
+
+                if any(
+                    keyword in line_lower
+                    for keyword in [
+                        "component",
+                        "interface",
+                        "dependency",
+                        "architecture",
+                        "system",
+                    ]
+                ):
+                    selected_lines.append(line)
+
+            if selected_lines:
+                return (
+                    "Based only on the retrieved HLD context:\n\n"
+                    + "\n".join(
+                        f"- {line}"
+                        for line in selected_lines[:6]
+                    )
+                )
+
         return (
-            "The provided HLD context does not contain "
-            "enough information."
+            "Based only on the retrieved HLD context:\n\n"
+            + "\n".join(
+                f"- {line}"
+                for line in unique_lines[:6]
+            )
         )
 
 
