@@ -3,7 +3,7 @@ from backend.rag.chunker import chunk_pages
 from backend.rag.vector_store import VectorStore
 
 
-pdf_path = r"data\uploads\sample.pdf"
+pdf_path = r"data\uploads\AUTOSAR_HLD_Demo_v1.pdf"
 
 pages = extract_text_from_pdf(pdf_path)
 chunks = chunk_pages(pages, chunk_size=300)

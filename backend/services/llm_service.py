@@ -6,7 +6,13 @@ from google import genai
 
 
 MODEL_NAME = "qwen2.5:1.5b-instruct-q4_0"
-GEMINI_MODEL = "gemini-3.8-flash"
+
+GEMINI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+]
 
 
 class LLMService:
@@ -34,6 +40,14 @@ class LLMService:
         context: str
     ) -> str | None:
 
+        """
+        Answer simple structured architecture questions
+        directly from explicit HLD facts.
+
+        This avoids asking a small LLM to enumerate facts
+        that can be extracted deterministically.
+        """
+
         question_lower = question.lower()
 
         # ====================================================
@@ -58,6 +72,7 @@ class LLMService:
             cleaned = []
 
             for dependency in dependencies:
+
                 dependency = dependency.strip()
 
                 if dependency and dependency not in cleaned:
@@ -73,6 +88,7 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
+
                     lines.append(
                         f"{index}. {dependency}"
                     )
@@ -106,6 +122,7 @@ class LLMService:
             cleaned = []
 
             for component in components:
+
                 component = component.strip()
 
                 if component and component not in cleaned:
@@ -121,6 +138,7 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
+
                     lines.append(
                         f"{index}. {component}"
                     )
@@ -150,6 +168,7 @@ class LLMService:
             cleaned = []
 
             for interface in interfaces:
+
                 interface = interface.strip()
 
                 if interface and interface not in cleaned:
@@ -165,6 +184,7 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
+
                     lines.append(
                         f"{index}. {interface}"
                     )
@@ -195,6 +215,7 @@ class LLMService:
             cleaned = []
 
             for port in ports:
+
                 port = port.strip()
 
                 if port and port not in cleaned:
@@ -210,6 +231,7 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
+
                     lines.append(
                         f"{index}. {port}"
                     )
@@ -240,6 +262,7 @@ class LLMService:
             cleaned = []
 
             for signal in signals:
+
                 signal = signal.strip()
 
                 if signal and signal not in cleaned:
@@ -255,6 +278,7 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
+
                     lines.append(
                         f"{index}. {signal}"
                     )
@@ -339,12 +363,119 @@ ANSWER:
             context
         )
 
-        response = self.gemini_client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
+        errors = []
+
+        for model in GEMINI_MODELS:
+
+            try:
+
+                response = self.gemini_client.models.generate_content(
+                    model=model,
+                    contents=prompt
+                )
+
+                if response.text:
+                    return response.text.strip()
+
+            except Exception as error:
+
+                errors.append(
+                    f"{model}: {error}"
+                )
+
+                continue
+
+        raise RuntimeError(
+            "All Gemini fallback models were unavailable. "
+            + " | ".join(errors)
         )
 
-        return response.text
+
+    def _context_fallback(
+        self,
+        question: str,
+        context: str
+    ) -> str:
+
+        """
+        Safe extractive fallback used when all LLM providers
+        are temporarily unavailable.
+
+        Uses only retrieved HLD context and never invents
+        information.
+        """
+
+        if not context.strip():
+            return (
+                "The provided HLD context does not contain "
+                "enough information."
+            )
+
+        question_lower = question.lower()
+
+        # ====================================================
+        # PDF / DOCUMENT SUMMARY
+        # ====================================================
+
+        if (
+            "what is the pdf about" in question_lower
+            or "what is this pdf about" in question_lower
+            or "what is the document about" in question_lower
+            or "what is this document about" in question_lower
+            or "summarize the pdf" in question_lower
+            or "summarize the document" in question_lower
+        ):
+
+            lines = [
+                line.strip()
+                for line in context.splitlines()
+                if line.strip()
+            ]
+
+            useful_lines = []
+
+            for line in lines:
+
+                if line.startswith("[Page"):
+                    continue
+
+                if line not in useful_lines:
+                    useful_lines.append(line)
+
+                if len(useful_lines) >= 5:
+                    break
+
+            if useful_lines:
+
+                return (
+                    "Based on the retrieved HLD context, the document "
+                    "describes an AUTOSAR high-level software architecture. "
+                    "Key information includes: "
+                    + " ".join(useful_lines)
+                )
+
+        # ====================================================
+        # GENERAL CONTEXT FALLBACK
+        # ====================================================
+
+        lines = [
+            line.strip()
+            for line in context.splitlines()
+            if line.strip()
+            and not line.startswith("[Page")
+        ]
+
+        if lines:
+
+            return (
+                "Based only on the retrieved HLD context: "
+                + " ".join(lines[:4])
+            )
+
+        return (
+            "The provided HLD context does not contain "
+            "enough information."
+        )
 
 
     def generate_answer(
@@ -394,15 +525,23 @@ ANSWER:
                         context
                     )
 
-                except Exception as gemini_error:
+                except Exception:
 
-                    raise RuntimeError(
-                        "Both Ollama and Gemini failed. "
-                        f"Ollama error: {ollama_error}. "
-                        f"Gemini error: {gemini_error}."
+                    # Gemini may temporarily return 503/429
+                    # or experience transient service problems.
+                    # Fall back to retrieved HLD context rather
+                    # than exposing provider errors to the user.
+
+                    return self._context_fallback(
+                        question,
+                        context
                     )
 
-            raise RuntimeError(
+            # ====================================================
+            # STEP 4: No cloud API configured
+            # ====================================================
+
+            return (
                 "Ollama is not available. "
                 "For local use, install and run Ollama with "
                 f"the {self.model_name} model. "
