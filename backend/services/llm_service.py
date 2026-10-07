@@ -1,9 +1,12 @@
+import os
 import re
 
 import ollama
+from google import genai
 
 
 MODEL_NAME = "qwen2.5:1.5b-instruct-q4_0"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 
 class LLMService:
@@ -14,19 +17,22 @@ class LLMService:
     ):
         self.model_name = model_name
 
+        # Gemini is used only when GEMINI_API_KEY is configured.
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+
+        self.gemini_client = None
+
+        if self.gemini_api_key:
+            self.gemini_client = genai.Client(
+                api_key=self.gemini_api_key
+            )
+
 
     def _extract_structured_facts(
         self,
         question: str,
         context: str
     ) -> str | None:
-        """
-        Answer simple structured architecture questions
-        directly from explicit HLD facts.
-
-        This avoids asking a small LLM to enumerate facts
-        that can be extracted deterministically.
-        """
 
         question_lower = question.lower()
 
@@ -44,8 +50,7 @@ class LLMService:
         ):
 
             dependencies = re.findall(
-                r"Dependency\s*:\s*"
-                r"(.+?)\s*(?:\n|$)",
+                r"Dependency\s*:\s*(.+?)\s*(?:\n|$)",
                 context,
                 re.IGNORECASE
             )
@@ -53,7 +58,6 @@ class LLMService:
             cleaned = []
 
             for dependency in dependencies:
-
                 dependency = dependency.strip()
 
                 if dependency and dependency not in cleaned:
@@ -69,7 +73,6 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
-
                     lines.append(
                         f"{index}. {dependency}"
                     )
@@ -103,7 +106,6 @@ class LLMService:
             cleaned = []
 
             for component in components:
-
                 component = component.strip()
 
                 if component and component not in cleaned:
@@ -119,7 +121,6 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
-
                     lines.append(
                         f"{index}. {component}"
                     )
@@ -149,7 +150,6 @@ class LLMService:
             cleaned = []
 
             for interface in interfaces:
-
                 interface = interface.strip()
 
                 if interface and interface not in cleaned:
@@ -165,7 +165,6 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
-
                     lines.append(
                         f"{index}. {interface}"
                     )
@@ -196,7 +195,6 @@ class LLMService:
             cleaned = []
 
             for port in ports:
-
                 port = port.strip()
 
                 if port and port not in cleaned:
@@ -212,7 +210,6 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
-
                     lines.append(
                         f"{index}. {port}"
                     )
@@ -243,7 +240,6 @@ class LLMService:
             cleaned = []
 
             for signal in signals:
-
                 signal = signal.strip()
 
                 if signal and signal not in cleaned:
@@ -259,7 +255,6 @@ class LLMService:
                     cleaned,
                     start=1
                 ):
-
                     lines.append(
                         f"{index}. {signal}"
                     )
@@ -270,32 +265,13 @@ class LLMService:
         return None
 
 
-    def generate_answer(
+    def _build_prompt(
         self,
         question: str,
         context: str
     ) -> str:
 
-        # ====================================================
-        # STEP 1: Try deterministic structured extraction
-        # ====================================================
-
-        structured_answer = (
-            self._extract_structured_facts(
-                question,
-                context
-            )
-        )
-
-        if structured_answer is not None:
-            return structured_answer
-
-
-        # ====================================================
-        # STEP 2: Use Qwen for natural-language questions
-        # ====================================================
-
-        prompt = f"""
+        return f"""
 You are AutoHLD AI, an assistant for analyzing AUTOSAR
 High-Level Design (HLD) documents.
 
@@ -322,6 +298,18 @@ ENGINEER QUESTION:
 ANSWER:
 """
 
+
+    def _generate_with_ollama(
+        self,
+        question: str,
+        context: str
+    ) -> str:
+
+        prompt = self._build_prompt(
+            question,
+            context
+        )
+
         response = ollama.chat(
             model=self.model_name,
             messages=[
@@ -333,3 +321,90 @@ ANSWER:
         )
 
         return response["message"]["content"]
+
+
+    def _generate_with_gemini(
+        self,
+        question: str,
+        context: str
+    ) -> str:
+
+        if not self.gemini_client:
+            raise RuntimeError(
+                "Gemini API key is not configured."
+            )
+
+        prompt = self._build_prompt(
+            question,
+            context
+        )
+
+        response = self.gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
+
+        return response.text
+
+
+    def generate_answer(
+        self,
+        question: str,
+        context: str
+    ) -> str:
+
+        # ====================================================
+        # STEP 1: Deterministic structured extraction
+        # ====================================================
+
+        structured_answer = (
+            self._extract_structured_facts(
+                question,
+                context
+            )
+        )
+
+        if structured_answer is not None:
+            return structured_answer
+
+
+        # ====================================================
+        # STEP 2: Prefer Ollama when available
+        # ====================================================
+
+        try:
+
+            return self._generate_with_ollama(
+                question,
+                context
+            )
+
+        except Exception as ollama_error:
+
+            # ====================================================
+            # STEP 3: Cloud fallback using Gemini
+            # ====================================================
+
+            if self.gemini_client:
+
+                try:
+
+                    return self._generate_with_gemini(
+                        question,
+                        context
+                    )
+
+                except Exception as gemini_error:
+
+                    raise RuntimeError(
+                        "Both Ollama and Gemini failed. "
+                        f"Ollama error: {ollama_error}. "
+                        f"Gemini error: {gemini_error}."
+                    )
+
+            raise RuntimeError(
+                "Ollama is not available. "
+                "For local use, install and run Ollama with "
+                f"the {self.model_name} model. "
+                "For cloud deployment, configure GEMINI_API_KEY."
+            )

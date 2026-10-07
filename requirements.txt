@@ -6,3 +6,4 @@ streamlit==1.63.0
 networkx==3.6.1
 graphviz==0.21
 pytest==9.1.1
+google-genai
