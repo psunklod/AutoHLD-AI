@@ -6,7 +6,7 @@ from google import genai
 
 
 MODEL_NAME = "qwen2.5:1.5b-instruct-q4_0"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.8-flash"
 
 
 class LLMService:
